@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流萤 - 3D Web 实验版 (Stencil 遮罩)</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #1a1b26;
+            font-family: sans-serif;
+        }
+
+        .card-stage {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            cursor: pointer;
+            /* 移除了 border-radius、overflow、box-shadow 和 background，完全交给 3D 渲染 */
+        }
+
+        #scene {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card-stage" id="cardStage">
+        <div id="scene"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.165.0/build/three.module.js';
+
+        const stage = document.getElementById('cardStage');
+        const host = document.getElementById('scene');
+
+        const width = 524;
+        const height = 753;
+
+        const scene = new THREE.Scene();
+        const viewportWidth = stage.clientWidth || window.innerWidth;
+        const viewportHeight = stage.clientHeight || window.innerHeight;
+        const camera = new THREE.PerspectiveCamera(30, viewportWidth / viewportHeight, 0.1, 100);
+        camera.position.set(0, 0, 8.4);
+
+        // 【修改点 1】确保开启了 stencil 缓冲区 (默认开启，但显式声明更安全)
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(viewportWidth, viewportHeight);
+        host.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
+        scene.add(ambientLight);
+
+        const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        keyLight.position.set(0.4, 1, 2);
+        scene.add(keyLight);
+
+        const textureLoader = new THREE.TextureLoader();
+        const bgTexture = textureLoader.load('背景.png');
+        const characterTexture = textureLoader.load('流萤.png');
+        const frameMaskTexture = textureLoader.load('card-border-mask.png');
+        const stencilMaskTexture = textureLoader.load('stencil-mask.png');
+        bgTexture.colorSpace = THREE.SRGBColorSpace;
+        characterTexture.colorSpace = THREE.SRGBColorSpace;
+        frameMaskTexture.colorSpace = THREE.NoColorSpace;
+        stencilMaskTexture.colorSpace = THREE.NoColorSpace;
+
+        const createFrameGradientTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.15, 'rgba(255,154,158,1)');
+            gradient.addColorStop(0.35, 'rgba(161,196,253,1)');
+            gradient.addColorStop(0.5, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.65, 'rgba(212,252,121,1)');
+            gradient.addColorStop(0.85, 'rgba(255,203,242,1)');
+            gradient.addColorStop(1, 'rgba(255,255,255,1)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 1024, 1024);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.wrapS = THREE.ClampToEdgeWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            return texture;
+        };
+
+        const createGlareTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 1024, 1024);
+            const cell = 32;
+            for (let y = 0; y < 1024; y += cell) {
+                for (let x = 0; x < 1024; x += cell) {
+                    const isEven = ((x / cell) + (y / cell)) % 2 === 0;
+                    ctx.fillStyle = isEven ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.03)';
+                    ctx.fillRect(x, y, cell, cell);
+                }
+            }
+            const sheen = ctx.createLinearGradient(0, 0, 1024, 1024);
+            sheen.addColorStop(0.2, 'rgba(255,255,255,0)');
+            sheen.addColorStop(0.45, 'rgba(255,255,255,0.22)');
+            sheen.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+            sheen.addColorStop(0.8, 'rgba(255,255,255,0)');
+            ctx.fillStyle = sheen;
+            ctx.fillRect(0, 0, 1024, 1024);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(30, 40);
+            return texture;
+        };
+
+        const frameGradientTexture = createFrameGradientTexture();
+        const glareTexture = createGlareTexture();
+
+        const cardGroup = new THREE.Group();
+        scene.add(cardGroup);
+        cardGroup.scale.setScalar(0.82);
+
+        const characterGroup = new THREE.Group();
+        cardGroup.add(characterGroup);
+        characterGroup.scale.setScalar(1.06);
+
+        const characterPivot = new THREE.Group();
+        characterGroup.add(characterPivot);
+
+        const cardRatio = width / height;
+        const cardHeight = 4.2;
+        const cardWidth = cardHeight * cardRatio;
+        const planeGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight, 1, 1);
+
+        // ==========================================
+        // 【核心修改 2】创建不可见的 Stencil 模板模型
+        // ==========================================
+        const stencilMaterial = new THREE.MeshBasicMaterial({
+            map: stencilMaskTexture,
+            transparent: false,
+            alphaTest: 0.5,     // 抛弃半透明像素，只让实体区域刻模板
+            colorWrite: false,  // 关键：不渲染颜色
+            depthWrite: false,  // 关键：不阻挡其他物体的深度
+            depthTest: false,
+            stencilWrite: true,
+            stencilRef: 1,
+            stencilFunc: THREE.AlwaysStencilFunc, // 永远通过并写入
+            stencilZPass: THREE.ReplaceStencilOp  // 将模板值替换为 1
+        });
+        const stencilMesh = new THREE.Mesh(planeGeometry, stencilMaterial);
+        // 设置渲染顺序在最前，确保它在其他元素渲染前完成“挖洞”
+        stencilMesh.renderOrder = -1;
+        stencilMesh.position.z = 0.22; // 把它放在和边框相同的层级
+        cardGroup.add(stencilMesh);
+
+
+        // ==========================================
+        // 【核心修改 3】给所有内容赋予 Stencil 读取能力
+        // ==========================================
+
+        const stencilContentConfig = {
+            stencilWrite: true,
+            stencilRef: 1,
+            stencilFunc: THREE.EqualStencilFunc // 只有遇到模板值为 1 时才渲染
+        };
+
+        const bgMesh = new THREE.Mesh(
+            planeGeometry,
+            new THREE.MeshBasicMaterial({
+                map: bgTexture,
+                ...stencilContentConfig // 应用模板规则
+            })
+        );
+        bgMesh.position.z = -0.35;
+        bgMesh.scale.set(1.10, 1.10, 1);
+        cardGroup.add(bgMesh);
+
+        const planeMaterial = new THREE.MeshBasicMaterial({
+            map: characterTexture,
+            transparent: true,
+            depthTest: true,
+            depthWrite: true,
+            ...stencilContentConfig // 应用模板规则
+        });
+
+        const characterPlane = new THREE.Mesh(planeGeometry, planeMaterial);
+        characterPlane.position.set(0, cardHeight * 0.5, 0.04);
+        characterPivot.add(characterPlane);
+
+        characterPivot.position.y = -cardHeight * 0.5;
+        const baseTiltX = THREE.MathUtils.degToRad(10);
+        characterPivot.rotation.x = baseTiltX;
+
+        const frameMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uGradient: { value: frameGradientTexture },
+                uMask: { value: frameMaskTexture },
+                uBgOffset: { value: new THREE.Vector2(0.3333, 0.3333) },
+                uSheen: { value: 0.5 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uGradient;
+                uniform sampler2D uMask;
+                uniform vec2 uBgOffset;
+                uniform float uSheen;
+                varying vec2 vUv;
+
+                void main() {
+                    vec2 gradUv = (vUv / 3.0) + uBgOffset;
+                    gradUv = clamp(gradUv, vec2(0.0), vec2(1.0));
+
+                    vec3 g1 = texture2D(uGradient, gradUv).rgb;
+                    vec3 g2 = texture2D(uGradient, clamp(gradUv + vec2(0.14, -0.08), vec2(0.0), vec2(1.0))).rgb;
+                    vec3 metallic = mix(g1, g2, 0.35);
+
+                    float sheenBand = 1.0 - smoothstep(0.0, 0.22, abs(vUv.x - uSheen));
+                    float verticalFalloff = 1.0 - smoothstep(0.0, 1.0, abs(vUv.y - 0.5) * 1.55);
+                    float sheen = sheenBand * verticalFalloff;
+                    metallic += vec3(sheen * 0.42);
+
+                    float rawMaskAlpha = texture2D(uMask, vUv).a;
+                    float maskAlpha = smoothstep(0.08, 0.92, rawMaskAlpha);
+                    if (maskAlpha < 0.01) discard;
+                    
+                    gl_FragColor = vec4(metallic, maskAlpha);
+                }
+            `,
+            transparent: true,
+            depthTest: true,
+            depthWrite: true,
+            ...stencilContentConfig // 应用模板规则
+        });
+
+        const frameMesh = new THREE.Mesh(planeGeometry, frameMaterial);
+        frameMesh.position.z = 0.22;
+        cardGroup.add(frameMesh);
+
+        const glareMesh = new THREE.Mesh(
+            planeGeometry,
+            new THREE.MeshBasicMaterial({
+                map: glareTexture,
+                transparent: true,
+                opacity: 0.24,
+                blending: THREE.AdditiveBlending,
+                depthTest: false,
+                depthWrite: false,
+                ...stencilContentConfig // 应用模板规则
+            })
+        );
+        glareMesh.position.z = 0.42;
+        glareMesh.renderOrder = 100;
+        cardGroup.add(glareMesh);
+
+        let targetCardRotX = 0;
+        let targetCardRotY = 0;
+        let targetNX = 0;
+        let targetNY = 0;
+
+        stage.addEventListener('mousemove', (event) => {
+            const rect = stage.getBoundingClientRect();
+            const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+
+            targetCardRotX = THREE.MathUtils.degToRad(-ny * 10);
+            targetCardRotY = THREE.MathUtils.degToRad(nx * 10);
+            targetNX = nx;
+            targetNY = ny;
+        });
+
+        stage.addEventListener('mouseleave', () => {
+            targetCardRotX = 0;
+            targetCardRotY = 0;
+            targetNX = 0;
+            targetNY = 0;
+        });
+
+        window.addEventListener('resize', () => {
+            const w = stage.clientWidth || window.innerWidth;
+            const h = stage.clientHeight || window.innerHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        });
+
+        const clock = new THREE.Clock();
+        function animate() {
+            const dt = Math.min(clock.getDelta(), 0.05);
+            const smoothing = 1 - Math.exp(-8 * dt);
+
+            cardGroup.rotation.x += (targetCardRotX - cardGroup.rotation.x) * smoothing;
+            cardGroup.rotation.y += (targetCardRotY - cardGroup.rotation.y) * smoothing;
+
+            const bgTargetX = targetNX * 0.08;
+            const bgTargetY = -targetNY * 0.08;
+            bgMesh.position.x += (bgTargetX - bgMesh.position.x) * smoothing;
+            bgMesh.position.y += (bgTargetY - bgMesh.position.y) * smoothing;
+
+            const charTargetX = targetNX * 0.2;
+            const charTargetY = -targetNY * 0.14;
+            characterGroup.position.x += (charTargetX - characterGroup.position.x) * smoothing;
+            characterGroup.position.y += (charTargetY - characterGroup.position.y) * smoothing;
+
+            const frameTargetX = targetNX * 0.18;
+            const frameTargetY = -targetNY * 0.12;
+            frameMesh.position.x += (frameTargetX - frameMesh.position.x) * smoothing;
+            frameMesh.position.y += (frameTargetY - frameMesh.position.y) * smoothing;
+
+            // 【核心修改 4】遮罩必须与物理边框的视差移动完全同步！
+            stencilMesh.position.x = frameMesh.position.x;
+            stencilMesh.position.y = frameMesh.position.y;
+
+            const bgPosX = (targetNX + 1) * 0.5;
+            const bgPosY = (targetNY + 1) * 0.5;
+            const targetOffsetX = bgPosX * (1 - 1 / 2.2);
+            const targetOffsetY = bgPosY * (1 - 1 / 2.2);
+            frameMaterial.uniforms.uBgOffset.value.x += (targetOffsetX - frameMaterial.uniforms.uBgOffset.value.x) * smoothing;
+            frameMaterial.uniforms.uBgOffset.value.y += (targetOffsetY - frameMaterial.uniforms.uBgOffset.value.y) * smoothing;
+            frameMaterial.uniforms.uSheen.value += (bgPosX - frameMaterial.uniforms.uSheen.value) * (smoothing * 1.15);
+
+            const glareTargetX = frameTargetX;
+            const glareTargetY = frameTargetY;
+            glareMesh.position.x += (glareTargetX - glareMesh.position.x) * smoothing;
+            glareMesh.position.y += (glareTargetY - glareMesh.position.y) * smoothing;
+
+            glareTexture.offset.x += (((targetNX * 0.6) - glareTexture.offset.x) * smoothing);
+            glareTexture.offset.y += (((targetNY * 0.15) - glareTexture.offset.y) * smoothing);
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+
+</body>
+
+</html>
