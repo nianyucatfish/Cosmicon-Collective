@@ -50,15 +50,24 @@
         const height = 753;
 
         const scene = new THREE.Scene();
-        const viewportWidth = stage.clientWidth || window.innerWidth;
-        const viewportHeight = stage.clientHeight || window.innerHeight;
+        function getViewportSize() {
+            // 兼容移动端横竖屏
+            return {
+                width: stage.clientWidth || window.innerWidth,
+                height: stage.clientHeight || window.innerHeight
+            };
+        }
+        let { width: viewportWidth, height: viewportHeight } = getViewportSize();
         const camera = new THREE.PerspectiveCamera(30, viewportWidth / viewportHeight, 0.1, 100);
         camera.position.set(0, 0, 8.4);
 
         // 【修改点 1】确保开启了 stencil 缓冲区 (默认开启，但显式声明更安全)
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.setSize(viewportWidth, viewportHeight);
+        renderer.setSize(viewportWidth, viewportHeight, false);
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        renderer.domElement.style.display = 'block';
         host.appendChild(renderer.domElement);
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
@@ -426,39 +435,100 @@
         const bandShiftX = -0.240;
         const bandShiftY = 0.115;
 
-        stage.addEventListener('mousemove', (event) => {
-            const rect = stage.getBoundingClientRect();
-            const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+        // 交互适配：PC鼠标+移动端触摸+陀螺仪
+        let isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        let gyroEnabled = false;
+        let lastGyro = { beta: 0, gamma: 0 };
 
-            // 左右交互方向映射（-nx 为反向，nx 为同向）
-            const interactionX = -nx;
-
-            // 限制运动范围：超过阈值后停在边界，不再继续增大
-            const clampedX = THREE.MathUtils.clamp(interactionX, -motionLimit, motionLimit);
+        function setTargetByNorm(nx, ny) {
+            // 限制运动范围
+            const clampedX = THREE.MathUtils.clamp(nx, -motionLimit, motionLimit);
             const clampedY = THREE.MathUtils.clamp(ny, -motionLimit, motionLimit);
-
-            // 鼠标驱动卡片旋转的“最大倾角”在这里的 maxTiltDeg（度）
-            // X 对应上下，Y 对应左右
             targetCardRotX = THREE.MathUtils.degToRad(-clampedY * maxTiltDeg);
             targetCardRotY = THREE.MathUtils.degToRad(clampedX * maxTiltDeg);
             targetNX = clampedX;
             targetNY = clampedY;
-        });
+        }
 
-        stage.addEventListener('mouseleave', () => {
-            targetCardRotX = 0;
-            targetCardRotY = 0;
-            targetNX = 0;
-            targetNY = 0;
-        });
+        if (isMobile) {
+            // 触摸事件
+            let touchActive = false;
+            stage.addEventListener('touchstart', (e) => {
+                touchActive = true;
+                if (!gyroEnabled) {
+                    handleTouch(e);
+                }
+            });
+            stage.addEventListener('touchmove', (e) => {
+                if (!gyroEnabled) {
+                    handleTouch(e);
+                }
+            });
+            stage.addEventListener('touchend', () => {
+                touchActive = false;
+                if (!gyroEnabled) {
+                    setTargetByNorm(0, 0);
+                }
+            });
+            function handleTouch(e) {
+                if (e.touches.length > 0) {
+                    const rect = stage.getBoundingClientRect();
+                    const touch = e.touches[0];
+                    const nx = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+                    const ny = ((touch.clientY - rect.top) / rect.height) * 2 - 1;
+                    setTargetByNorm(-nx, ny);
+                }
+            }
+
+            // 陀螺仪支持
+            if (window.DeviceOrientationEvent) {
+                // iOS 13+ 需要权限
+                function enableGyro() {
+                    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                        DeviceOrientationEvent.requestPermission().then((response) => {
+                            if (response === 'granted') {
+                                gyroEnabled = true;
+                            }
+                        });
+                    } else {
+                        gyroEnabled = true;
+                    }
+                }
+                // 用户首次触摸启用陀螺仪
+                stage.addEventListener('click', enableGyro, { once: true });
+                stage.addEventListener('touchend', enableGyro, { once: true });
+
+                window.addEventListener('deviceorientation', (event) => {
+                    if (!gyroEnabled) return;
+                    // beta: 前后, gamma: 左右
+                    let beta = event.beta || 0; // [-180,180]
+                    let gamma = event.gamma || 0; // [-90,90]
+                    // 归一化到 [-1,1]
+                    let nx = THREE.MathUtils.clamp(gamma / 45, -1, 1);
+                    let ny = THREE.MathUtils.clamp(beta / 45, -1, 1);
+                    // 方向适配
+                    setTargetByNorm(nx, ny);
+                    lastGyro = { beta, gamma };
+                });
+            }
+        } else {
+            // PC端鼠标
+            stage.addEventListener('mousemove', (event) => {
+                const rect = stage.getBoundingClientRect();
+                const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+                setTargetByNorm(-nx, ny);
+            });
+            stage.addEventListener('mouseleave', () => {
+                setTargetByNorm(0, 0);
+            });
+        }
 
         window.addEventListener('resize', () => {
-            const w = stage.clientWidth || window.innerWidth;
-            const h = stage.clientHeight || window.innerHeight;
+            const { width: w, height: h } = getViewportSize();
             camera.aspect = w / h;
             camera.updateProjectionMatrix();
-            renderer.setSize(w, h);
+            renderer.setSize(w, h, false);
         });
 
         const clock = new THREE.Clock();
