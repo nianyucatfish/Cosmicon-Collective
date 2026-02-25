@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>流萤 - 3D Web 实验版 (交线羽化)</title>
+    <title>银河战力党</title>
     <style>
         body {
             display: flex;
@@ -45,8 +45,32 @@
         const stage = document.getElementById('cardStage');
         const host = document.getElementById('scene');
 
-        const width = 524;
-        const height = 753;
+
+        // Release 配置参数集中
+        const config = {
+            cardWidthPx: 524,
+            cardHeightPx: 753,
+            cardHeight: 4.2,
+            ambientLightIntensity: 1.1,
+            keyLightIntensity: 0.6,
+            keyLightPos: [0.4, 1, 2],
+            cameraFov: 30,
+            cameraZ: 8.4,
+            cardScaleMobile: 0.6,
+            cardScalePC: 0.82,
+            characterScale: 1.10,
+            baseTiltDeg: 4,
+            featherDist: 0.03,
+            maxTiltDeg: 50,
+            motionLimit: 0.25,
+            bandShiftX: -0.240,
+            bandShiftY: 0.115,
+            characterMoveXScale: 2.0,
+            characterMoveYScale: 5.0
+        };
+
+        const width = config.cardWidthPx;
+        const height = config.cardHeightPx;
 
         const scene = new THREE.Scene();
         function getViewportSize() {
@@ -57,8 +81,8 @@
             };
         }
         let { width: viewportWidth, height: viewportHeight } = getViewportSize();
-        const camera = new THREE.PerspectiveCamera(30, viewportWidth / viewportHeight, 0.1, 100);
-        camera.position.set(0, 0, 8.4);
+        const camera = new THREE.PerspectiveCamera(config.cameraFov, viewportWidth / viewportHeight, 0.1, 100);
+        camera.position.set(0, 0, config.cameraZ);
 
         // 确保开启了 stencil 缓冲区
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
@@ -69,20 +93,21 @@
         renderer.domElement.style.display = 'block';
         host.appendChild(renderer.domElement);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
+        const ambientLight = new THREE.AmbientLight(0xffffff, config.ambientLightIntensity);
         scene.add(ambientLight);
 
-        const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
-        keyLight.position.set(0.4, 1, 2);
+        const keyLight = new THREE.DirectionalLight(0xffffff, config.keyLightIntensity);
+        keyLight.position.set(...config.keyLightPos);
         scene.add(keyLight);
 
+
         const textureLoader = new THREE.TextureLoader();
-        const bgTexture = textureLoader.load('asset/背景.png');
-        const characterTexture = textureLoader.load('asset/流萤.png');
+        const bgTexture = textureLoader.load('asset/liuying/background.png');
+        const characterTexture = textureLoader.load('asset/liuying/character.png');
         const frameMaskTexture = textureLoader.load('asset/card-border-mask.png');
         const stencilMaskTexture = textureLoader.load('asset/stencil-mask.png');
-        const descriptionTexture = textureLoader.load('asset/描述.png');
-        const valueTexture = textureLoader.load('asset/数值.png');
+        const descriptionTexture = textureLoader.load('asset/liuying/description.png');
+        const valueTexture = textureLoader.load('asset/liuying/value.png');
 
         bgTexture.colorSpace = THREE.SRGBColorSpace;
         characterTexture.colorSpace = THREE.SRGBColorSpace;
@@ -209,20 +234,20 @@
         const cardGroup = new THREE.Group();
         scene.add(cardGroup);
         if (isMobile) {
-            cardGroup.scale.setScalar(0.6);
+            cardGroup.scale.setScalar(config.cardScaleMobile);
         } else {
-            cardGroup.scale.setScalar(0.82);
+            cardGroup.scale.setScalar(config.cardScalePC);
         }
 
         const characterGroup = new THREE.Group();
         cardGroup.add(characterGroup);
-        characterGroup.scale.setScalar(1.10);
+        characterGroup.scale.setScalar(config.characterScale);
 
         const characterPivot = new THREE.Group();
         characterGroup.add(characterPivot);
 
         const cardRatio = width / height;
-        const cardHeight = 4.2;
+        const cardHeight = config.cardHeight;
         const cardWidth = cardHeight * cardRatio;
         const planeGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight, 1, 1);
 
@@ -279,8 +304,7 @@
         characterPivot.add(characterPlane);
 
         characterPivot.position.y = -cardHeight * 0.54;
-        let baseTiltDeg = 4;
-        const baseTiltX = THREE.MathUtils.degToRad(baseTiltDeg);
+        const baseTiltX = THREE.MathUtils.degToRad(config.baseTiltDeg);
         characterPivot.rotation.x = baseTiltX;
 
         // ==========================================
@@ -296,7 +320,7 @@
                 uCharTex: { value: characterTexture },
                 uCharInverseMatrix: { value: new THREE.Matrix4() },
                 uCardSize: { value: new THREE.Vector2(cardWidth, cardHeight) },
-                uFeatherDist: { value: 0.03 } // 【控制参数】交线羽化的宽度
+                uFeatherDist: { value: config.featherDist }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -479,12 +503,12 @@
         let targetCardRotY = 0;
         let targetNX = 0;
         let targetNY = 0;
-        const maxTiltDeg = 50;
-        const motionLimit = 0.25;
-        const bandShiftX = -0.240;
-        const bandShiftY = 0.115;
-        let characterMoveXScale = 2.0;
-        let characterMoveYScale = 5.0;
+        const maxTiltDeg = config.maxTiltDeg;
+        const motionLimit = config.motionLimit;
+        const bandShiftX = config.bandShiftX;
+        const bandShiftY = config.bandShiftY;
+        let characterMoveXScale = config.characterMoveXScale;
+        let characterMoveYScale = config.characterMoveYScale;
 
         function setTargetByNorm(nx, ny) {
             const clampedX = THREE.MathUtils.clamp(nx, -motionLimit, motionLimit);
