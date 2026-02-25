@@ -73,10 +73,15 @@
         const characterTexture = textureLoader.load('流萤.png');
         const frameMaskTexture = textureLoader.load('card-border-mask.png');
         const stencilMaskTexture = textureLoader.load('stencil-mask.png');
+        const descriptionTexture = textureLoader.load('描述.png');
+        const valueTexture = textureLoader.load('数值.png');
         bgTexture.colorSpace = THREE.SRGBColorSpace;
         characterTexture.colorSpace = THREE.SRGBColorSpace;
+        characterTexture.premultiplyAlpha = true;
         frameMaskTexture.colorSpace = THREE.NoColorSpace;
         stencilMaskTexture.colorSpace = THREE.NoColorSpace;
+        descriptionTexture.colorSpace = THREE.SRGBColorSpace;
+        valueTexture.colorSpace = THREE.SRGBColorSpace;
 
         const createFrameGradientTexture = () => {
             const canvas = document.createElement('canvas');
@@ -125,7 +130,7 @@
             texture.colorSpace = THREE.SRGBColorSpace;
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(30, 40);
+            texture.repeat.set(20, 30);
             return texture;
         };
 
@@ -138,7 +143,7 @@
 
         const characterGroup = new THREE.Group();
         cardGroup.add(characterGroup);
-        characterGroup.scale.setScalar(1.06);
+        characterGroup.scale.setScalar(1.10);
 
         const characterPivot = new THREE.Group();
         characterGroup.add(characterPivot);
@@ -194,6 +199,9 @@
         const planeMaterial = new THREE.MeshBasicMaterial({
             map: characterTexture,
             transparent: true,
+            alphaTest: 0,
+            alphaToCoverage: true,
+            premultipliedAlpha: true,
             depthTest: true,
             depthWrite: true,
             ...stencilContentConfig // 应用模板规则
@@ -204,7 +212,9 @@
         characterPivot.add(characterPlane);
 
         characterPivot.position.y = -cardHeight * 0.5;
-        const baseTiltX = THREE.MathUtils.degToRad(10);
+        // 角色“初始前倾角”（静止时就会有的基础倾斜）
+        // 调大：更俯视；调小：更接近平视。
+        const baseTiltX = THREE.MathUtils.degToRad(7);
         characterPivot.rotation.x = baseTiltX;
 
         const frameMaterial = new THREE.ShaderMaterial({
@@ -229,7 +239,7 @@
                 varying vec2 vUv;
 
                 void main() {
-                    vec2 gradUv = (vUv / 3.0) + uBgOffset;
+                    vec2 gradUv = (vUv / 1.6) + uBgOffset;
                     gradUv = clamp(gradUv, vec2(0.0), vec2(1.0));
 
                     vec3 g1 = texture2D(uGradient, gradUv).rgb;
@@ -250,13 +260,43 @@
             `,
             transparent: true,
             depthTest: true,
-            depthWrite: true,
-            ...stencilContentConfig // 应用模板规则
+            depthWrite: false,
+            stencilWrite: false
         });
 
         const frameMesh = new THREE.Mesh(planeGeometry, frameMaterial);
         frameMesh.position.z = 0.22;
+        frameMesh.renderOrder = 120;
         cardGroup.add(frameMesh);
+
+        const descriptionMesh = new THREE.Mesh(
+            planeGeometry,
+            new THREE.MeshBasicMaterial({
+                map: descriptionTexture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+                ...stencilContentConfig
+            })
+        );
+        descriptionMesh.position.z = 0.20;
+        descriptionMesh.renderOrder = 110;
+        cardGroup.add(descriptionMesh);
+
+        const valueMesh = new THREE.Mesh(
+            planeGeometry,
+            new THREE.MeshBasicMaterial({
+                map: valueTexture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+                ...stencilContentConfig
+            })
+        );
+        valueMesh.position.z = 0.24;
+        valueMesh.scale.set(0.95, 0.95, 1);
+        valueMesh.renderOrder = 121;
+        cardGroup.add(valueMesh);
 
         const glareMesh = new THREE.Mesh(
             planeGeometry,
@@ -271,7 +311,7 @@
             })
         );
         glareMesh.position.z = 0.42;
-        glareMesh.renderOrder = 100;
+        glareMesh.renderOrder = 130;
         cardGroup.add(glareMesh);
 
         let targetCardRotX = 0;
@@ -284,9 +324,14 @@
             const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
 
+            // 左右交互方向映射（-nx 为反向，nx 为同向）
+            const interactionX = -nx;
+
+            // 鼠标驱动卡片旋转的“最大倾角”在这里的 10（度）
+            // X 对应上下，Y 对应左右
             targetCardRotX = THREE.MathUtils.degToRad(-ny * 10);
-            targetCardRotY = THREE.MathUtils.degToRad(nx * 10);
-            targetNX = nx;
+            targetCardRotY = THREE.MathUtils.degToRad(interactionX * 10);
+            targetNX = interactionX;
             targetNY = ny;
         });
 
@@ -306,9 +351,13 @@
         });
 
         const clock = new THREE.Clock();
+        // 与上面鼠标旋转保持一致：用于把当前旋转归一化到 [-1, 1]
+        // 若你把 mousemove 中的 10 改了，这里建议同步改成同样角度。
+        const maxCardTiltRad = THREE.MathUtils.degToRad(10);
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.05);
             const smoothing = 1 - Math.exp(-8 * dt);
+            const charSmoothing = 1 - Math.exp(-12 * dt);
 
             cardGroup.rotation.x += (targetCardRotX - cardGroup.rotation.x) * smoothing;
             cardGroup.rotation.y += (targetCardRotY - cardGroup.rotation.y) * smoothing;
@@ -318,15 +367,35 @@
             bgMesh.position.x += (bgTargetX - bgMesh.position.x) * smoothing;
             bgMesh.position.y += (bgTargetY - bgMesh.position.y) * smoothing;
 
-            const charTargetX = targetNX * 0.2;
-            const charTargetY = -targetNY * 0.14;
-            characterGroup.position.x += (charTargetX - characterGroup.position.x) * smoothing;
-            characterGroup.position.y += (charTargetY - characterGroup.position.y) * smoothing;
+            // 当前旋转因子（-1~1），用于“旋转时角色平移”增强景深
+            const rotFactorX = THREE.MathUtils.clamp(cardGroup.rotation.y / maxCardTiltRad, -1, 1);
+            const rotFactorY = THREE.MathUtils.clamp(cardGroup.rotation.x / maxCardTiltRad, -1, 1);
+            // 角色平移强度：
+            // 0.2/0.14 = 鼠标视差基础强度
+            // 0.12/0.08 = 由旋转额外带动的平移强度（越大越有“深度拉扯感”）
+            const charTargetX = (targetNX * 0.14) + (rotFactorX * 0.08);
+            const charTargetY = (targetNY * 0.07) - (rotFactorY * 0.035);
+            // 前后位移强度（Z 轴）：越大越“冲出屏幕”
+            const charTargetZ = (Math.abs(rotFactorX) + Math.abs(rotFactorY)) * 0;
+            characterGroup.position.x += (charTargetX - characterGroup.position.x) * charSmoothing;
+            characterGroup.position.y += (charTargetY - characterGroup.position.y) * charSmoothing;
+            characterGroup.position.z += (charTargetZ - characterGroup.position.z) * charSmoothing;
+
+            const charRotTargetX = cardGroup.rotation.x * 0.1;
+            const charRotTargetY = cardGroup.rotation.y * 0.2;
+            characterGroup.rotation.x += (charRotTargetX - characterGroup.rotation.x) * charSmoothing;
+            characterGroup.rotation.y += (charRotTargetY - characterGroup.rotation.y) * charSmoothing;
 
             const frameTargetX = targetNX * 0.18;
             const frameTargetY = -targetNY * 0.12;
             frameMesh.position.x += (frameTargetX - frameMesh.position.x) * smoothing;
             frameMesh.position.y += (frameTargetY - frameMesh.position.y) * smoothing;
+
+            descriptionMesh.position.x = frameMesh.position.x;
+            descriptionMesh.position.y = frameMesh.position.y - 0.1;
+
+            valueMesh.position.x = frameMesh.position.x;
+            valueMesh.position.y = frameMesh.position.y;
 
             // 【核心修改 4】遮罩必须与物理边框的视差移动完全同步！
             stencilMesh.position.x = frameMesh.position.x;
