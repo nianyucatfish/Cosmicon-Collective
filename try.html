@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>流萤 - 3D Web 实验版 (Stencil 遮罩)</title>
+    <title>流萤 - 3D Web 实验版 (交线羽化)</title>
     <style>
         body {
             display: flex;
@@ -21,7 +21,6 @@
             height: 100vh;
             position: relative;
             cursor: pointer;
-            /* 移除了 border-radius、overflow、box-shadow 和 background，完全交给 3D 渲染 */
         }
 
         #scene {
@@ -61,7 +60,7 @@
         const camera = new THREE.PerspectiveCamera(30, viewportWidth / viewportHeight, 0.1, 100);
         camera.position.set(0, 0, 8.4);
 
-        // 【修改点 1】确保开启了 stencil 缓冲区 (默认开启，但显式声明更安全)
+        // 确保开启了 stencil 缓冲区
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(viewportWidth, viewportHeight, false);
@@ -84,6 +83,7 @@
         const stencilMaskTexture = textureLoader.load('asset/stencil-mask.png');
         const descriptionTexture = textureLoader.load('asset/描述.png');
         const valueTexture = textureLoader.load('asset/数值.png');
+
         bgTexture.colorSpace = THREE.SRGBColorSpace;
         characterTexture.colorSpace = THREE.SRGBColorSpace;
         characterTexture.premultiplyAlpha = true;
@@ -204,12 +204,10 @@
         let isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         let gyroEnabled = false;
         let lastGyro = { beta: 0, gamma: 0 };
-        // 移动端陀螺仪前倾偏置（单位：度，正值为前倾）
         const gyroTiltBiasDeg = -60;
 
         const cardGroup = new THREE.Group();
         scene.add(cardGroup);
-        // 移动端缩小卡面尺寸
         if (isMobile) {
             cardGroup.scale.setScalar(0.6);
         } else {
@@ -228,49 +226,43 @@
         const cardWidth = cardHeight * cardRatio;
         const planeGeometry = new THREE.PlaneGeometry(cardWidth, cardHeight, 1, 1);
 
-        // ==========================================
-        // 【核心修改 2】创建不可见的 Stencil 模板模型
-        // ==========================================
+        // 创建不可见的 Stencil 模板模型
         const stencilMaterial = new THREE.MeshBasicMaterial({
             map: stencilMaskTexture,
             transparent: false,
-            alphaTest: 0.5,     // 抛弃半透明像素，只让实体区域刻模板
-            colorWrite: false,  // 关键：不渲染颜色
-            depthWrite: false,  // 关键：不阻挡其他物体的深度
+            alphaTest: 0.5,
+            colorWrite: false,
+            depthWrite: false,
             depthTest: false,
             stencilWrite: true,
             stencilRef: 1,
-            stencilFunc: THREE.AlwaysStencilFunc, // 永远通过并写入
-            stencilZPass: THREE.ReplaceStencilOp  // 将模板值替换为 1
+            stencilFunc: THREE.AlwaysStencilFunc,
+            stencilZPass: THREE.ReplaceStencilOp
         });
         const stencilMesh = new THREE.Mesh(planeGeometry, stencilMaterial);
-        // 设置渲染顺序在最前，确保它在其他元素渲染前完成“挖洞”
         stencilMesh.renderOrder = -1;
-        stencilMesh.position.z = 0.22; // 把它放在和边框相同的层级
+        stencilMesh.position.z = 0.22;
         cardGroup.add(stencilMesh);
 
-
-        // ==========================================
-        // 【核心修改 3】给所有内容赋予 Stencil 读取能力
-        // ==========================================
 
         const stencilContentConfig = {
             stencilWrite: true,
             stencilRef: 1,
-            stencilFunc: THREE.EqualStencilFunc // 只有遇到模板值为 1 时才渲染
+            stencilFunc: THREE.EqualStencilFunc
         };
 
         const bgMesh = new THREE.Mesh(
             planeGeometry,
             new THREE.MeshBasicMaterial({
                 map: bgTexture,
-                ...stencilContentConfig // 应用模板规则
+                ...stencilContentConfig
             })
         );
         bgMesh.position.z = -0.35;
         bgMesh.scale.set(1.18, 1.18, 1);
         cardGroup.add(bgMesh);
 
+        // 角色平面
         const planeMaterial = new THREE.MeshBasicMaterial({
             map: characterTexture,
             transparent: true,
@@ -279,32 +271,41 @@
             premultipliedAlpha: true,
             depthTest: true,
             depthWrite: true,
-            ...stencilContentConfig // 应用模板规则
+            ...stencilContentConfig
         });
 
         const characterPlane = new THREE.Mesh(planeGeometry, planeMaterial);
         characterPlane.position.set(0, cardHeight * 0.5, 0.04);
         characterPivot.add(characterPlane);
 
-        // 角色整体向下微调，原本 -cardHeight * 0.5，现调整为 -cardHeight * 0.58
         characterPivot.position.y = -cardHeight * 0.54;
-        // 设置角色初始前倾角度，增强立体感
         let baseTiltDeg = 4;
         const baseTiltX = THREE.MathUtils.degToRad(baseTiltDeg);
         characterPivot.rotation.x = baseTiltX;
 
+        // ==========================================
+        // 【核心修改】带有软相交羽化计算的边框材质
+        // ==========================================
         const frameMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uGradient: { value: frameGradientTexture },
                 uMask: { value: frameMaskTexture },
                 uBgOffset: { value: new THREE.Vector2(0.0327, 0.3877) },
-                uSheen: { value: 0.5 }
+                uSheen: { value: 0.5 },
+
+                uCharTex: { value: characterTexture },
+                uCharInverseMatrix: { value: new THREE.Matrix4() },
+                uCardSize: { value: new THREE.Vector2(cardWidth, cardHeight) },
+                uFeatherDist: { value: 0.03 } // 【控制参数】交线羽化的宽度
             },
             vertexShader: `
                 varying vec2 vUv;
+                varying vec3 vWorldPos;
                 void main() {
                     vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
                 }
             `,
             fragmentShader: `
@@ -312,7 +313,14 @@
                 uniform sampler2D uMask;
                 uniform vec2 uBgOffset;
                 uniform float uSheen;
+                
+                uniform sampler2D uCharTex;
+                uniform mat4 uCharInverseMatrix;
+                uniform vec2 uCardSize;
+                uniform float uFeatherDist;
+
                 varying vec2 vUv;
+                varying vec3 vWorldPos;
 
                 void main() {
                     vec2 gradUv = (vUv / 3.0) + uBgOffset;
@@ -329,8 +337,36 @@
 
                     float rawMaskAlpha = texture2D(uMask, vUv).a;
                     float maskAlpha = smoothstep(0.08, 0.92, rawMaskAlpha);
-                    if (maskAlpha < 0.01) discard;
                     
+                    if (maskAlpha < 0.01) discard;
+
+                    // 1. 获取边框像素在角色局部空间中的坐标
+                    vec4 charLocalPos = uCharInverseMatrix * vec4(vWorldPos, 1.0);
+                    
+                    // 2. 计算像素到角色平面的 Z 轴距离 (即到交线的距离)
+                    float distToCharPlane = abs(charLocalPos.z);
+
+                    // ==========================================
+                    // 【性能优化】只在交线羽化半径内的像素，才进行昂贵的纹理采样
+                    // ==========================================
+                    if (distToCharPlane < uFeatherDist) {
+                        // 局部坐标映射为角色的 UV 坐标
+                        vec2 charUv = vec2(charLocalPos.x / uCardSize.x + 0.5, charLocalPos.y / uCardSize.y + 0.5);
+
+                        // 确保 UV 在合法范围内才采样
+                        if (charUv.x >= 0.0 && charUv.x <= 1.0 && charUv.y >= 0.0 && charUv.y <= 1.0) {
+                            float charAlpha = texture2D(uCharTex, charUv).a;
+                            
+                            // 生成平滑的消融系数
+                            float intersectionFade = smoothstep(0.0, uFeatherDist, distToCharPlane);
+                            
+                            // 压暗融合
+                            maskAlpha *= mix(1.0, intersectionFade, charAlpha);
+                        }
+                    }
+                    
+                    if (maskAlpha < 0.01) discard;
+
                     gl_FragColor = vec4(metallic, maskAlpha);
                 }
             `,
@@ -383,12 +419,12 @@
                 blending: THREE.AdditiveBlending,
                 depthTest: false,
                 depthWrite: false,
-                ...stencilContentConfig // 应用模板规则
+                ...stencilContentConfig
             })
         );
         glareMesh.position.z = 0.42;
         glareMesh.renderOrder = 130;
-        glareMesh.scale.set(1.08, 1.08, 1); // 尺寸稍稍放大
+        glareMesh.scale.set(1.08, 1.08, 1);
         cardGroup.add(glareMesh);
 
         const sparkleMaterial = new THREE.ShaderMaterial({
@@ -447,15 +483,10 @@
         const motionLimit = 0.25;
         const bandShiftX = -0.240;
         const bandShiftY = 0.115;
-        // 新增参数：角色左右平移强度
-        let characterMoveXScale = 2.0; // 默认 1.0，可调整
-        // 新增参数：角色上下平移强度
-        let characterMoveYScale = 5.0; // 默认 1.0，可调整
-
-        // ...existing code...
+        let characterMoveXScale = 2.0;
+        let characterMoveYScale = 5.0;
 
         function setTargetByNorm(nx, ny) {
-            // 限制运动范围
             const clampedX = THREE.MathUtils.clamp(nx, -motionLimit, motionLimit);
             const clampedY = THREE.MathUtils.clamp(ny, -motionLimit, motionLimit);
             targetCardRotX = THREE.MathUtils.degToRad(-clampedY * maxTiltDeg);
@@ -465,7 +496,6 @@
         }
 
         if (isMobile) {
-            // 触摸事件
             let touchActive = false;
             stage.addEventListener('touchstart', (e) => {
                 touchActive = true;
@@ -494,9 +524,7 @@
                 }
             }
 
-            // 陀螺仪支持
             if (window.DeviceOrientationEvent) {
-                // iOS 13+ 需要权限
                 function enableGyro() {
                     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                         DeviceOrientationEvent.requestPermission().then((response) => {
@@ -508,27 +536,21 @@
                         gyroEnabled = true;
                     }
                 }
-                // 用户首次触摸启用陀螺仪
                 stage.addEventListener('click', enableGyro, { once: true });
                 stage.addEventListener('touchend', enableGyro, { once: true });
 
                 window.addEventListener('deviceorientation', (event) => {
                     if (!gyroEnabled) return;
-                    // beta: 前后, gamma: 左右
-                    let beta = event.beta || 0; // [-180,180]
-                    let gamma = event.gamma || 0; // [-90,90]
-                    // 加上前倾偏置
+                    let beta = event.beta || 0;
+                    let gamma = event.gamma || 0;
                     beta += gyroTiltBiasDeg;
-                    // 归一化到 [-1,1]
                     let nx = THREE.MathUtils.clamp(gamma / 10, -1, 1);
                     let ny = THREE.MathUtils.clamp(beta / 45, -1, 1);
-                    // 方向适配
                     setTargetByNorm(nx, ny);
                     lastGyro = { beta, gamma };
                 });
             }
         } else {
-            // PC端鼠标
             stage.addEventListener('mousemove', (event) => {
                 const rect = stage.getBoundingClientRect();
                 const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -548,9 +570,8 @@
         });
 
         const clock = new THREE.Clock();
-        // 与上面鼠标旋转保持一致：用于把当前旋转归一化到 [-1, 1]
-        // 若你把 mousemove 中的 maxTiltDeg 改了，这里建议保持同步。
         const maxCardTiltRad = THREE.MathUtils.degToRad(maxTiltDeg);
+
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.05);
             const smoothing = 1 - Math.exp(-8 * dt);
@@ -564,15 +585,11 @@
             bgMesh.position.x += (bgTargetX - bgMesh.position.x) * smoothing;
             bgMesh.position.y += (bgTargetY - bgMesh.position.y) * smoothing;
 
-            // 当前旋转因子（-1~1），用于“旋转时角色平移”增强景深
             const rotFactorX = THREE.MathUtils.clamp(cardGroup.rotation.y / maxCardTiltRad, -1, 1);
             const rotFactorY = THREE.MathUtils.clamp(cardGroup.rotation.x / maxCardTiltRad, -1, 1);
-            // 角色平移强度：
-            // 0.2/0.14 = 鼠标视差基础强度
-            // 0.12/0.08 = 由旋转额外带动的平移强度（越大越有“深度拉扯感”）
+
             const charTargetX = (targetNX * 0.14 * characterMoveXScale) + (rotFactorX * 0.08 * characterMoveXScale);
             const charTargetY = (targetNY * 0.07 * characterMoveYScale) - (rotFactorY * 0.035 * characterMoveYScale);
-            // 前后位移强度（Z 轴）：越大越“冲出屏幕”
             const charTargetZ = (Math.abs(rotFactorX) + Math.abs(rotFactorY)) * 0;
             characterGroup.position.x += (charTargetX - characterGroup.position.x) * charSmoothing;
             characterGroup.position.y += (charTargetY - characterGroup.position.y) * charSmoothing;
@@ -594,7 +611,6 @@
             valueMesh.position.x = frameMesh.position.x;
             valueMesh.position.y = frameMesh.position.y;
 
-            // 【核心修改 4】遮罩必须与物理边框的视差移动完全同步！
             stencilMesh.position.x = frameMesh.position.x;
             stencilMesh.position.y = frameMesh.position.y;
 
@@ -627,6 +643,12 @@
             glareTexture.offset.y += (((targetNY * 0.15) - glareTexture.offset.y) * smoothing);
             sparkleTexture.offset.x += (((targetNX * 0.6) - sparkleTexture.offset.x) * smoothing);
             sparkleTexture.offset.y += (((targetNY * 0.15) - sparkleTexture.offset.y) * smoothing);
+
+            // ==========================================
+            // 【核心修改】将角色矩阵传递给边框用于动态消融
+            // 修复 matrixWorld 一帧滞后问题，强制更新父级链
+            characterPlane.updateWorldMatrix(true, false);
+            frameMaterial.uniforms.uCharInverseMatrix.value.copy(characterPlane.matrixWorld).invert();
 
             renderer.render(scene, camera);
             requestAnimationFrame(animate);
