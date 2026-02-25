@@ -111,21 +111,31 @@
             canvas.height = 1024;
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, 1024, 1024);
-            const cell = 32;
+            const cell = 20;
             for (let y = 0; y < 1024; y += cell) {
                 for (let x = 0; x < 1024; x += cell) {
                     const isEven = ((x / cell) + (y / cell)) % 2 === 0;
-                    ctx.fillStyle = isEven ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.03)';
+                    ctx.fillStyle = isEven ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)';
                     ctx.fillRect(x, y, cell, cell);
                 }
             }
             const sheen = ctx.createLinearGradient(0, 0, 1024, 1024);
             sheen.addColorStop(0.2, 'rgba(255,255,255,0)');
-            sheen.addColorStop(0.45, 'rgba(255,255,255,0.22)');
-            sheen.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+            sheen.addColorStop(0.45, 'rgba(255,255,255,0.3)');
+            sheen.addColorStop(0.55, 'rgba(255,255,255,0.12)');
             sheen.addColorStop(0.8, 'rgba(255,255,255,0)');
             ctx.fillStyle = sheen;
             ctx.fillRect(0, 0, 1024, 1024);
+
+            for (let i = 0; i < 1700; i++) {
+                const x = Math.random() * 1024;
+                const y = Math.random() * 1024;
+                const size = 0.8 + Math.random() * 2.2;
+                const alpha = 0.08 + Math.random() * 0.32;
+                ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                ctx.fillRect(x, y, size, size);
+            }
+
             const texture = new THREE.CanvasTexture(canvas);
             texture.colorSpace = THREE.SRGBColorSpace;
             texture.wrapS = THREE.RepeatWrapping;
@@ -134,8 +144,52 @@
             return texture;
         };
 
+        const createSparkleTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 1024, 1024);
+
+            for (let i = 0; i < 700; i++) {
+                const x = Math.random() * 1024;
+                const y = Math.random() * 1024;
+                const radius = 0.35 + Math.random() * 1.35;
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.9);
+                gradient.addColorStop(0.0, 'rgba(255,255,255,1)');
+                gradient.addColorStop(0.22, 'rgba(255,245,220,0.9)');
+                gradient.addColorStop(0.6, 'rgba(255,220,245,0.26)');
+                gradient.addColorStop(1.0, 'rgba(255,255,255,0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, radius * 2.9, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (Math.random() > 0.56) {
+                    const lineSize = radius * (1.8 + Math.random() * 1.6);
+                    const lineAlpha = 0.12 + Math.random() * 0.16;
+                    ctx.strokeStyle = `rgba(255,255,255,${lineAlpha})`;
+                    ctx.lineWidth = 0.35 + Math.random() * 0.45;
+                    ctx.beginPath();
+                    ctx.moveTo(x - lineSize, y);
+                    ctx.lineTo(x + lineSize, y);
+                    ctx.moveTo(x, y - lineSize);
+                    ctx.lineTo(x, y + lineSize);
+                    ctx.stroke();
+                }
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(5.2, 7.6);
+            return texture;
+        };
+
         const frameGradientTexture = createFrameGradientTexture();
         const glareTexture = createGlareTexture();
+        const sparkleTexture = createSparkleTexture();
 
         const cardGroup = new THREE.Group();
         scene.add(cardGroup);
@@ -221,7 +275,7 @@
             uniforms: {
                 uGradient: { value: frameGradientTexture },
                 uMask: { value: frameMaskTexture },
-                uBgOffset: { value: new THREE.Vector2(0.3333, 0.3333) },
+                uBgOffset: { value: new THREE.Vector2(0.0327, 0.3877) },
                 uSheen: { value: 0.5 }
             },
             vertexShader: `
@@ -239,7 +293,7 @@
                 varying vec2 vUv;
 
                 void main() {
-                    vec2 gradUv = (vUv / 1.6) + uBgOffset;
+                    vec2 gradUv = (vUv / 3.0) + uBgOffset;
                     gradUv = clamp(gradUv, vec2(0.0), vec2(1.0));
 
                     vec3 g1 = texture2D(uGradient, gradUv).rgb;
@@ -303,7 +357,7 @@
             new THREE.MeshBasicMaterial({
                 map: glareTexture,
                 transparent: true,
-                opacity: 0.24,
+                opacity: 0.2,
                 blending: THREE.AdditiveBlending,
                 depthTest: false,
                 depthWrite: false,
@@ -312,13 +366,65 @@
         );
         glareMesh.position.z = 0.42;
         glareMesh.renderOrder = 130;
+        glareMesh.scale.set(1.08, 1.08, 1); // 尺寸稍稍放大
         cardGroup.add(glareMesh);
+
+        const sparkleMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uSparkleMap: { value: sparkleTexture },
+                uLightUv: { value: new THREE.Vector2(0.5, 0.5) },
+                uMotion: { value: 0.0 },
+                uBaseOpacity: { value: 0.22 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uSparkleMap;
+                uniform vec2 uLightUv;
+                uniform float uMotion;
+                uniform float uBaseOpacity;
+                varying vec2 vUv;
+
+                void main() {
+                    vec4 texel = texture2D(uSparkleMap, vUv);
+                    float dist = distance(vUv, uLightUv);
+                    float core = smoothstep(0.30, 0.0, dist);
+                    float halo = smoothstep(0.62, 0.18, dist);
+                    float localBoost = (core * 0.95 + halo * 0.45) * uMotion;
+
+                    float alpha = texel.a * (uBaseOpacity + localBoost);
+                    if (alpha < 0.01) discard;
+
+                    vec3 color = texel.rgb * (0.78 + localBoost * 1.45);
+                    gl_FragColor = vec4(color, min(alpha, 1.0));
+                }
+            `,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthTest: false,
+            depthWrite: false,
+            ...stencilContentConfig
+        });
+
+        const sparkleMesh = new THREE.Mesh(planeGeometry, sparkleMaterial);
+        sparkleMesh.position.z = 0.44;
+        sparkleMesh.renderOrder = 131;
+        sparkleMesh.scale.set(1.03, 1.03, 1);
+        cardGroup.add(sparkleMesh);
 
         let targetCardRotX = 0;
         let targetCardRotY = 0;
         let targetNX = 0;
         let targetNY = 0;
-        const maxTiltDeg = 20;
+        const maxTiltDeg = 50;
+        const motionLimit = 0.45;
+        const bandShiftX = -0.240;
+        const bandShiftY = 0.115;
 
         stage.addEventListener('mousemove', (event) => {
             const rect = stage.getBoundingClientRect();
@@ -328,12 +434,16 @@
             // 左右交互方向映射（-nx 为反向，nx 为同向）
             const interactionX = -nx;
 
+            // 限制运动范围：超过阈值后停在边界，不再继续增大
+            const clampedX = THREE.MathUtils.clamp(interactionX, -motionLimit, motionLimit);
+            const clampedY = THREE.MathUtils.clamp(ny, -motionLimit, motionLimit);
+
             // 鼠标驱动卡片旋转的“最大倾角”在这里的 maxTiltDeg（度）
             // X 对应上下，Y 对应左右
-            targetCardRotX = THREE.MathUtils.degToRad(-ny * maxTiltDeg);
-            targetCardRotY = THREE.MathUtils.degToRad(interactionX * maxTiltDeg);
-            targetNX = interactionX;
-            targetNY = ny;
+            targetCardRotX = THREE.MathUtils.degToRad(-clampedY * maxTiltDeg);
+            targetCardRotY = THREE.MathUtils.degToRad(clampedX * maxTiltDeg);
+            targetNX = clampedX;
+            targetNY = clampedY;
         });
 
         stage.addEventListener('mouseleave', () => {
@@ -387,8 +497,8 @@
             characterGroup.rotation.x += (charRotTargetX - characterGroup.rotation.x) * charSmoothing;
             characterGroup.rotation.y += (charRotTargetY - characterGroup.rotation.y) * charSmoothing;
 
-            const frameTargetX = targetNX * 0.18;
-            const frameTargetY = -targetNY * 0.12;
+            const frameTargetX = targetNX * 0.2;
+            const frameTargetY = -targetNY * 0.2;
             frameMesh.position.x += (frameTargetX - frameMesh.position.x) * smoothing;
             frameMesh.position.y += (frameTargetY - frameMesh.position.y) * smoothing;
 
@@ -404,8 +514,8 @@
 
             const bgPosX = (targetNX + 1) * 0.5;
             const bgPosY = (targetNY + 1) * 0.5;
-            const targetOffsetX = bgPosX * (1 - 1 / 2.2);
-            const targetOffsetY = bgPosY * (1 - 1 / 2.2);
+            const targetOffsetX = bgPosX * (1 - 1 / 2.2) + bandShiftX;
+            const targetOffsetY = bgPosY * (1 - 1 / 2.2) + bandShiftY;
             frameMaterial.uniforms.uBgOffset.value.x += (targetOffsetX - frameMaterial.uniforms.uBgOffset.value.x) * smoothing;
             frameMaterial.uniforms.uBgOffset.value.y += (targetOffsetY - frameMaterial.uniforms.uBgOffset.value.y) * smoothing;
             frameMaterial.uniforms.uSheen.value += (bgPosX - frameMaterial.uniforms.uSheen.value) * (smoothing * 1.15);
@@ -415,8 +525,22 @@
             glareMesh.position.x += (glareTargetX - glareMesh.position.x) * smoothing;
             glareMesh.position.y += (glareTargetY - glareMesh.position.y) * smoothing;
 
+            sparkleMesh.position.x = frameMesh.position.x;
+            sparkleMesh.position.y = frameMesh.position.y;
+
+            const cardMotion = Math.abs(targetCardRotX - cardGroup.rotation.x) + Math.abs(targetCardRotY - cardGroup.rotation.y);
+            const sparkleReflect = THREE.MathUtils.clamp(cardMotion * 2.7 + (Math.abs(targetNX) + Math.abs(targetNY)) * 0.2, 0.0, 1.0);
+            const lightTargetX = THREE.MathUtils.clamp(0.5 + targetNX * 0.42 + rotFactorX * 0.08, 0.08, 0.92);
+            const lightTargetY = THREE.MathUtils.clamp(0.5 - targetNY * 0.34 - rotFactorY * 0.06, 0.08, 0.92);
+            sparkleMaterial.uniforms.uMotion.value += (sparkleReflect - sparkleMaterial.uniforms.uMotion.value) * Math.min(1, smoothing * 2.0);
+            sparkleMaterial.uniforms.uLightUv.value.x += (lightTargetX - sparkleMaterial.uniforms.uLightUv.value.x) * Math.min(1, smoothing * 1.8);
+            sparkleMaterial.uniforms.uLightUv.value.y += (lightTargetY - sparkleMaterial.uniforms.uLightUv.value.y) * Math.min(1, smoothing * 1.8);
+            sparkleMesh.rotation.z += ((targetNX * 0.05) - sparkleMesh.rotation.z) * smoothing;
+
             glareTexture.offset.x += (((targetNX * 0.6) - glareTexture.offset.x) * smoothing);
             glareTexture.offset.y += (((targetNY * 0.15) - glareTexture.offset.y) * smoothing);
+            sparkleTexture.offset.x += (((targetNX * 0.6) - sparkleTexture.offset.x) * smoothing);
+            sparkleTexture.offset.y += (((targetNY * 0.15) - sparkleTexture.offset.y) * smoothing);
 
             renderer.render(scene, camera);
             requestAnimationFrame(animate);
