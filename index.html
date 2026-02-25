@@ -47,26 +47,27 @@
 
 
         // Release 配置参数集中
+        // 配置参数说明：
         const config = {
-            cardWidthPx: 524,
-            cardHeightPx: 753,
-            cardHeight: 4.2,
-            ambientLightIntensity: 1.1,
-            keyLightIntensity: 0.6,
-            keyLightPos: [0.4, 1, 2],
-            cameraFov: 30,
-            cameraZ: 8.4,
-            cardScaleMobile: 0.6,
-            cardScalePC: 0.82,
-            characterScale: 1.10,
-            baseTiltDeg: 4,
-            featherDist: 0.03,
-            maxTiltDeg: 50,
-            motionLimit: 0.25,
-            bandShiftX: -0.240,
-            bandShiftY: 0.115,
-            characterMoveXScale: 2.0,
-            characterMoveYScale: 5.0
+            cardWidthPx: 524, // 卡片像素宽度
+            cardHeightPx: 753, // 卡片像素高度
+            cardHeight: 4.2, // 卡片在3D场景中的高度（单位：THREE坐标）
+            ambientLightIntensity: 1.1, // 环境光强度
+            keyLightIntensity: 0.6, // 主光源强度
+            keyLightPos: [0.4, 1, 2], // 主光源位置 [x, y, z]
+            cameraFov: 30, // 摄像机视场角
+            cameraZ: 8.4, // 摄像机Z轴距离
+            cardScaleMobile: 0.5, // 移动端卡片缩放比例
+            cardScalePC: 0.6, // PC端卡片缩放比例
+            characterScale: 1.10, // 角色缩放比例
+            baseTiltDeg: 4, // 卡片基础倾斜角度（度）
+            featherDist: 0.03, // 边框羽化距离
+            maxTiltDeg: 50, // 最大倾斜角度（度）
+            motionLimit: 0.25, // 卡片交互最大归一化偏移
+            bandShiftX: -0.240, // 边框渐变偏移X
+            bandShiftY: 0.115, // 边框渐变偏移Y
+            characterMoveXScale: 2.0, // 角色X轴移动缩放
+            characterMoveYScale: 5.0 // 角色Y轴移动缩放
         };
 
         const width = config.cardWidthPx;
