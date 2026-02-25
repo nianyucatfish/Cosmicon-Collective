@@ -193,7 +193,7 @@
             })
         );
         bgMesh.position.z = -0.35;
-        bgMesh.scale.set(1.10, 1.10, 1);
+        bgMesh.scale.set(1.18, 1.18, 1);
         cardGroup.add(bgMesh);
 
         const planeMaterial = new THREE.MeshBasicMaterial({
@@ -318,6 +318,7 @@
         let targetCardRotY = 0;
         let targetNX = 0;
         let targetNY = 0;
+        const maxTiltDeg = 20;
 
         stage.addEventListener('mousemove', (event) => {
             const rect = stage.getBoundingClientRect();
@@ -327,10 +328,10 @@
             // 左右交互方向映射（-nx 为反向，nx 为同向）
             const interactionX = -nx;
 
-            // 鼠标驱动卡片旋转的“最大倾角”在这里的 10（度）
+            // 鼠标驱动卡片旋转的“最大倾角”在这里的 maxTiltDeg（度）
             // X 对应上下，Y 对应左右
-            targetCardRotX = THREE.MathUtils.degToRad(-ny * 10);
-            targetCardRotY = THREE.MathUtils.degToRad(interactionX * 10);
+            targetCardRotX = THREE.MathUtils.degToRad(-ny * maxTiltDeg);
+            targetCardRotY = THREE.MathUtils.degToRad(interactionX * maxTiltDeg);
             targetNX = interactionX;
             targetNY = ny;
         });
@@ -352,8 +353,8 @@
 
         const clock = new THREE.Clock();
         // 与上面鼠标旋转保持一致：用于把当前旋转归一化到 [-1, 1]
-        // 若你把 mousemove 中的 10 改了，这里建议同步改成同样角度。
-        const maxCardTiltRad = THREE.MathUtils.degToRad(10);
+        // 若你把 mousemove 中的 maxTiltDeg 改了，这里建议保持同步。
+        const maxCardTiltRad = THREE.MathUtils.degToRad(maxTiltDeg);
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.05);
             const smoothing = 1 - Math.exp(-8 * dt);
@@ -382,7 +383,7 @@
             characterGroup.position.z += (charTargetZ - characterGroup.position.z) * charSmoothing;
 
             const charRotTargetX = cardGroup.rotation.x * 0.1;
-            const charRotTargetY = cardGroup.rotation.y * 0.2;
+            const charRotTargetY = cardGroup.rotation.y * 0.1;
             characterGroup.rotation.x += (charRotTargetX - characterGroup.rotation.x) * charSmoothing;
             characterGroup.rotation.y += (charRotTargetY - characterGroup.rotation.y) * charSmoothing;
 
