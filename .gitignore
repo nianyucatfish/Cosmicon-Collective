@@ -1,1 +1,8 @@
 未标题-1.psd
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
